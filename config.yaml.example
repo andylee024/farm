@@ -1,0 +1,14 @@
+repos:
+  scout:
+    path: /Users/andylee/Projects/scout
+    default_branch: main
+    test_command: "pytest -v"
+worktree_root: /Users/andylee/Projects/worktrees
+agent_defaults:
+  codex_model: gpt-5.3-codex
+  claude_model: claude-opus-4.5
+linear:
+  api_url: https://api.linear.app/graphql
+  api_key_env: LINEAR_API_KEY
+  team_id_env: LINEAR_TEAM_ID
+  # team_id: YOUR_LINEAR_TEAM_ID

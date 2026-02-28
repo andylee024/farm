@@ -1,0 +1,4 @@
+interface:
+  display_name: "Farm Linear Planning"
+  short_description: "Plan and decompose work in Linear using farm CLI commands."
+  default_prompt: "Use this skill to decompose parent work into atomic Linear child tasks and drive the farm intake/decide/run/status loop."
