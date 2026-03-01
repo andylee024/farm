@@ -1,4 +1,4 @@
 interface:
-  display_name: "Farm Linear Planning"
-  short_description: "Plan and decompose work in Linear using farm CLI commands."
-  default_prompt: "Use this skill to decompose parent work into atomic Linear child tasks and drive the farm intake/decide/run/status loop."
+  display_name: "Farm Linear Planning (Alias)"
+  short_description: "Deprecated alias. Use feature-task-decomposition."
+  default_prompt: "Use feature-task-decomposition for decomposition and planning workflows."

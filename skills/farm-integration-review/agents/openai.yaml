@@ -1,0 +1,4 @@
+interface:
+  display_name: "Farm Integration Review"
+  short_description: "Bundle child worktrees into one PR and update parent Linear status."
+  default_prompt: "Use this skill to review completed child branches, build one integration PR, and move the parent Linear issue to In Review with the PR link attached."

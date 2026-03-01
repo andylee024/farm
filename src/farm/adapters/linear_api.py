@@ -10,7 +10,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from farm.adapters.linear_mcp import LinearChildIssue
 from farm.core.errors import LinearApiError
 
 GraphqlRequestFn = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
@@ -127,6 +126,13 @@ class LinearIssue:
     parent_id: str | None
     state_name: str | None
     project_name: str | None
+
+
+@dataclass(slots=True)
+class LinearChildIssue:
+    id: str
+    title: str
+    description: str
 
 
 def _default_graphql_request(
@@ -340,13 +346,20 @@ class LinearApiClient:
                 state_name = state["name"]
             if state_name is None:
                 continue
-            counts[state_name] = counts.get(state_name, 0) + 1
+            canonical_state = self._canonical_status_name(state_name)
+            counts[canonical_state] = counts.get(canonical_state, 0) + 1
         return counts
 
     def get_state_id(self, state_name: str) -> str:
         if self._state_id_by_name is None:
             self._state_id_by_name = self._load_state_id_by_name()
-        state_id = self._state_id_by_name.get(state_name.lower())
+        normalized = state_name.strip().lower()
+        state_id = self._state_id_by_name.get(normalized)
+        if state_id is None:
+            for candidate in self._status_alias_candidates(normalized):
+                state_id = self._state_id_by_name.get(candidate)
+                if state_id is not None:
+                    break
         if state_id is None:
             available = ", ".join(sorted(self._state_id_by_name.keys()))
             raise LinearApiError(
@@ -458,11 +471,38 @@ class LinearApiClient:
             raise LinearApiError("No projects found for configured Linear team.")
         return mapping
 
+    @staticmethod
+    def _status_alias_candidates(name: str) -> list[str]:
+        alias_map: dict[str, list[str]] = {
+            "backlog": ["todo"],
+            "approved": ["todo"],
+            "coding": ["in progress"],
+            "completed": ["done"],
+            "canceled": ["cancelled"],
+            "cancelled": ["canceled"],
+        }
+        return alias_map.get(name, [])
+
+    @staticmethod
+    def _canonical_status_name(name: str) -> str:
+        normalized = name.strip().lower()
+        if normalized in {"backlog"}:
+            return "Backlog"
+        if normalized in {"approved", "todo"}:
+            return "Approved"
+        if normalized in {"coding", "in progress"}:
+            return "Coding"
+        if normalized in {"completed", "done"}:
+            return "Completed"
+        if normalized in {"canceled", "cancelled"}:
+            return "Canceled"
+        return name
+
     def _execute(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         response = self.request_fn(
             self.api_url,
             {"query": query, "variables": variables},
-            {"Authorization": f"Bearer {self.api_key}"},
+            {"Authorization": self.api_key},
         )
         errors = response.get("errors")
         if errors:

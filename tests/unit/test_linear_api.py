@@ -59,7 +59,7 @@ def test_create_parent_issue_sends_expected_payload() -> None:
 
     headers = captured["headers"]
     assert isinstance(headers, dict)
-    assert headers["Authorization"] == "Bearer secret"
+    assert headers["Authorization"] == "secret"
 
 
 def test_create_child_issue_sets_parent_id() -> None:
@@ -225,3 +225,30 @@ def test_move_issue_to_status_uses_issue_update() -> None:
     assert isinstance(payload, dict)
     assert payload["variables"]["id"] == "issue-10"
     assert payload["variables"]["input"]["stateId"] == "state-2"
+
+
+def test_move_issue_to_status_uses_alias_when_exact_missing() -> None:
+    captured: dict[str, object] = {}
+
+    def fake_request(url: str, payload: dict[str, object], headers: dict[str, str]) -> dict[str, object]:
+        _ = url
+        _ = headers
+        query = payload["query"]
+        if "TeamStates" in query:
+            return {"data": {"team": {"states": {"nodes": [{"id": "state-todo", "name": "Todo"}]}}}}
+        if "IssueUpdate" in query:
+            captured["payload"] = payload
+            return {"data": {"issueUpdate": {"success": True, "issue": {"id": "issue-11"}}}}
+        raise AssertionError(f"Unexpected query: {query}")
+
+    client = LinearApiClient(
+        api_url="https://api.linear.app/graphql",
+        api_key="secret",
+        team_id="team-abc",
+        request_fn=fake_request,
+    )
+    client.move_issue_to_status("issue-11", "Approved")
+
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["variables"]["input"]["stateId"] == "state-todo"

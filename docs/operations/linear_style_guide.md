@@ -1,8 +1,8 @@
 # Farm Linear Style Guide (Lean)
 
 Status: Active
-Last updated: 2026-02-28
-Applies to: Farm orchestration work across `scout`, `farm`, `train`
+Last updated: 2026-03-01
+Applies to: Farm orchestration work across all repo keys configured in `config.yaml`
 
 ## 1) Purpose
 
@@ -14,7 +14,7 @@ Keep Linear lightweight while still giving Farm enough structure to:
 
 This guide intentionally uses minimal statuses and fields.
 
-## 2) Required Workflow (5 statuses only)
+## 2) Required Workflow (5 child statuses)
 
 Use exactly these issue statuses:
 
@@ -31,10 +31,14 @@ Definitions:
 - `Completed`: ready for your PR approval on integration path, or approved/merged.
 - `Canceled`: dropped, duplicate, or no longer relevant.
 
+Parent review stage:
+- Parent issues may move to `In Review` after the integration PR is opened and linked.
+- `In Review` is parent-only and does not change child status policy.
+
 ## 3) Required Fields (minimal)
 
 Use only:
-- `Project` (must be one of: `scout`, `farm`, `train`)
+- `Project` (must match a configured repo key in Farm config)
 - `Parent/Sub-issue` (parent = intent, children = atomic tasks)
 
 Optional:
@@ -47,6 +51,7 @@ Do not require milestone, priority, or extra custom fields.
 Parent issue:
 - captures the intent/outcome.
 - should not be directly executed by an agent.
+- moves to `In Review` when the parent integration PR is ready for human review.
 
 Child issue:
 - is the execution unit for Farm.
@@ -56,7 +61,7 @@ Child issue:
 ## 5) Agent Context Standard
 
 Every child issue must include a short `Context Pack` section with:
-- repo context (`scout`, `farm`, or `train`),
+- repo context (`<repo-key>` from Farm config),
 - relevant local file paths,
 - links to [PRD](../prd.md) and [V0 Technical Plan](../feature/v0/technical_plan.md),
 - any constraints needed for safe execution.
@@ -71,8 +76,17 @@ Use this exact section order in each child issue description:
 2. `Scope`
 3. `Out of Scope`
 4. `Acceptance Checks`
-5. `Context Pack`
-6. `Evidence Required`
+5. `Agent Startup Instructions`
+6. `Context Pack`
+7. `Evidence Required`
+
+Required `Agent Startup Instructions` content:
+
+```md
+## Agent Startup Instructions
+- Before making changes, read this repository to understand full project context (architecture, conventions, and constraints).
+- Then implement only the scoped task in this issue.
+```
 
 Minimum quality bar:
 - `Acceptance Checks` must be deterministic (exact command, check, or observable condition).
@@ -106,3 +120,6 @@ A child issue is `Completed` only when:
 
 PR opened alone is not done.
 
+## 10) Review Process
+
+Parent review flow, gates, and summary format are defined in [review_pipeline.md](./review_pipeline.md).

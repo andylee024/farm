@@ -9,7 +9,8 @@ Before running CLI commands:
   - title
   - scope
   - deterministic acceptance checks
-  - repo (`scout` | `farm` | `train`)
+  - startup instruction to read the repository for full context before coding
+  - repo (`<repo-key>` from Farm config)
 
 ## 2) Create Parent
 
@@ -17,7 +18,7 @@ Before running CLI commands:
 farm intake \
   --title "<parent title>" \
   --description "<parent outcome + constraints>" \
-  --repo <scout|farm|train> \
+  --repo <repo-key> \
   --status backlog
 ```
 
@@ -31,17 +32,19 @@ Run once per child:
 farm intake \
   --title "<child title>" \
   --description "<child scope + acceptance checks + evidence needed>" \
-  --repo <scout|farm|train> \
+  --repo <repo-key> \
   --parent-id <parent-issue-id> \
   --status backlog
 ```
+
+Farm appends a standard `Agent Startup Instructions` block to child issue descriptions automatically.
 
 ## 4) Human Decision Gate
 
 Approve:
 
 ```bash
-farm decide --issue <child-issue-id> --approve --repo <scout|farm|train>
+farm decide --issue <child-issue-id> --approve --repo <repo-key>
 ```
 
 Cancel:
@@ -53,7 +56,7 @@ farm decide --issue <child-issue-id> --cancel
 ## 5) Execute
 
 ```bash
-farm run --repo <scout|farm|train>
+farm run --repo <repo-key>
 ```
 
 Run repeatedly as needed.

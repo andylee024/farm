@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feature Task Decomposition"
+  short_description: "Decompose feature intent into atomic Linear child tasks using Farm CLI."
+  default_prompt: "Use this skill to break feature intent into atomic tasks and drive the farm intake/decide/run/status loop."
