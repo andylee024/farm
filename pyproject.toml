@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-farm = "farm.cli:main"
+farm = "farm.cli.commands:main"
 
 [project.optional-dependencies]
 dev = [

@@ -1,5 +1,5 @@
 """External adapters used by Farm services."""
 
-from farm.adapters.linear_api import LinearApiClient
+from farm.adapters.linear import LinearClient
 
-__all__ = ["LinearApiClient"]
+__all__ = ["LinearClient"]

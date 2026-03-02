@@ -1,40 +1,68 @@
 # Farm
 
-Farm is the orchestration entrypoint for coding work across all repositories you manage in Linear.
+Farm is a minimal single-task orchestrator for Linear coding issues.
 
-It provides one consistent control plane for:
+## Why Farm Exists
 
-- task intake and decomposition (parent/child),
-- agent execution orchestration,
-- review/verification workflow,
-- parent-level integration and handoff.
+Farm is built for one practical workflow:
 
-## Core Model
+1. Capture a feature as tasks in Linear quickly.
+2. Execute child coding tasks in a consistent way.
+3. Review one integration PR at the end for the full feature.
 
-1. Use Linear as the portfolio board.
-2. Use Farm CLI as the lifecycle engine.
-3. Keep planning/business logic in skills/docs, not runtime orchestration code.
-4. Use one consistent status policy and review pipeline across repos.
+It keeps planning and integration policy in skills, while the runtime stays focused on execution.
 
-Any repository can be orchestrated as long as it exists in `config.yaml` under `repos`.
+Farm is the coding-task lifecycle entrypoint into Linear for this workflow.
+
+## What Problem It Solves
+
+Without Farm, feature delivery tends to sprawl across ad-hoc tickets, inconsistent agent execution, and many small PR reviews.
+
+Farm solves this by:
+
+1. Enforcing a simple child-task lifecycle in Linear (`Backlog -> Approved -> Coding -> Done/Canceled`).
+2. Running child tasks through one deterministic runtime path.
+3. Creating one clear human decision point at the integration PR.
+
+## Intended Workflow
+
+1. Planner skill creates one parent issue and atomic child issues in Linear.
+2. Farm runtime runs one approved child at a time (`run/update/finish/status`).
+3. Integrator skill consolidates completed children into one final PR for review.
+
+## What Farm Is Not
+
+1. Not a planning engine in runtime code.
+2. Not a multi-task scheduler or queue manager.
+3. Not a replacement for human prioritization or final merge approval.
+
+## Core Design
+
+Farm runs one issue at a time and writes exactly two artifacts per task:
+
+1. `task_updates.jsonl` for periodic progress updates
+2. `task_result.json` for final outcome
+
+`farm run` creates a git worktree, starts a tmux session, and launches Codex or Claude in that session.
+
+No queue scheduler, local lifecycle state machine, or registry database in the core flow.
 
 ## CLI Surface
 
-- `farm intake`: create a parent or child issue.
-- `farm decide`: approve/cancel child execution.
-- `farm run`: launch one queued task.
-- `farm status`: board/runtime summary.
-- `farm doctor`: environment and config health checks.
-- `farm watch`: live worker and board snapshot.
-- `farm pulse`: strong-default active monitor.
+- `farm run` - start one approved issue
+- `farm update` - append a task update
+- `farm finish` - finalize with outcome
+- `farm status` - read Linear + local artifacts summary
 
-## Canonical Documentation
+## Documentation
 
-- Style guide: [docs/operations/linear_style_guide.md](docs/operations/linear_style_guide.md)
-- Quickstart: [docs/operations/quickstart.md](docs/operations/quickstart.md)
-- Development workflow: [docs/operations/development_workflow.md](docs/operations/development_workflow.md)
-- Review pipeline: [docs/operations/review_pipeline.md](docs/operations/review_pipeline.md)
-- Worker status contract: [docs/operations/worker_status_contract.md](docs/operations/worker_status_contract.md)
-- Workflow ownership architecture: [docs/architecture/workflow_ownership.md](docs/architecture/workflow_ownership.md)
-- Planning skill: [skills/feature-task-decomposition/SKILL.md](skills/feature-task-decomposition/SKILL.md)
-- Integration review skill: [skills/farm-integration-review/SKILL.md](skills/farm-integration-review/SKILL.md)
+1. Runtime operations and artifact contract: [docs/operations/operations.md](docs/operations/operations.md)
+2. Architecture and scope plan: [features/v0/plan.md](features/v0/plan.md)
+
+## Demo Scripts
+
+Use these from repo root for a live Linear smoke test:
+
+1. Check strict statuses exist in team workflow: `PYTHONPATH=src python scripts/demo/check_linear_statuses.py --config config.yaml`
+2. Seed parent + child sample issues in Linear: `PYTHONPATH=src python scripts/demo/seed_linear_tasks.py --config config.yaml --repo farm --children 3 --prefix "Farm Flow Test" --approve-first`
+3. Run one child through Farm lifecycle: `PYTHONPATH=src python scripts/demo/run_linear_flow.py --config config.yaml --repo farm --issue <child-issue-id> --outcome completed`

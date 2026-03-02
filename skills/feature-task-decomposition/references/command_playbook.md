@@ -1,73 +1,39 @@
-# Farm Linear Planning Playbook
+# Farm Planning + Execution Playbook (Simple)
 
 ## 1) Decompose In Chat First
 
-Before running CLI commands:
-- State the parent outcome in one sentence.
-- Propose child issues as atomic, independently testable units.
-- For each child, define:
-  - title
-  - scope
-  - deterministic acceptance checks
-  - startup instruction to read the repository for full context before coding
-  - repo (`<repo-key>` from Farm config)
+Before execution:
 
-## 2) Create Parent
+- Define parent outcome.
+- Define atomic child issues.
+- Confirm deterministic checks.
 
-```bash
-farm intake \
-  --title "<parent title>" \
-  --description "<parent outcome + constraints>" \
-  --repo <repo-key> \
-  --status backlog
-```
+## 2) Approve One Child In Linear
 
-Capture parent issue id from CLI output.
+Set target child issue state to `Approved`.
 
-## 3) Create Children
-
-Run once per child:
+## 3) Execute One Child
 
 ```bash
-farm intake \
-  --title "<child title>" \
-  --description "<child scope + acceptance checks + evidence needed>" \
-  --repo <repo-key> \
-  --parent-id <parent-issue-id> \
-  --status backlog
+farm run --config config.yaml --repo <repo-key> --issue <child-issue-id>
 ```
 
-Farm appends a standard `Agent Startup Instructions` block to child issue descriptions automatically.
-
-## 4) Human Decision Gate
-
-Approve:
+## 4) Optional Progress Updates
 
 ```bash
-farm decide --issue <child-issue-id> --approve --repo <repo-key>
+farm update --config config.yaml --repo <repo-key> --issue <child-issue-id> --phase running --summary "..."
 ```
 
-Cancel:
+## 5) Finish
 
 ```bash
-farm decide --issue <child-issue-id> --cancel
+farm finish --config config.yaml --repo <repo-key> --issue <child-issue-id> --outcome completed --summary "..." --pr-url "<optional-pr-url>"
+# or canceled
+farm finish --config config.yaml --repo <repo-key> --issue <child-issue-id> --outcome canceled --summary "..."
 ```
 
-## 5) Execute
+## 6) Check Snapshot
 
 ```bash
-farm run --repo <repo-key>
+farm status --config config.yaml --repo <repo-key> --issue <child-issue-id>
 ```
-
-Run repeatedly as needed.
-
-## 6) Observe
-
-```bash
-farm status
-```
-
-Use output to decide:
-- approve next children,
-- unblock/cancel tasks,
-- or move to review/merge steps.
