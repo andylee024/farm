@@ -30,6 +30,58 @@ Farm solves this by:
 2. Farm runtime runs one approved child at a time (`run/update/finish/status`).
 3. Integrator skill consolidates completed children into one final PR for review.
 
+## Architecture (ASCII)
+
+```text
+                    (Skill) Planner
+      feature intent / PRD -> parent + child issues
+                                 |
+                                 v
+ +----------------------------------------------------+
+ |                      Linear                        |
+ |  Backlog -> Approved -> Coding -> Done/Canceled   |
+ +--------------------------+-------------------------+
+                            ^
+                            | read/write issue state
+                            |
+ +--------------------------+-------------------------+
+ |                 Farm Runtime Kernel                |
+ |                  run / update / finish / status    |
+ |                                                     |
+ |  run: git worktree -> tmux session -> agent launch |
+ |  update: append TaskUpdate                          |
+ |  finish: write TaskResult + move status            |
+ +--------------------------+-------------------------+
+                            |
+                            v
+     <worktree_root>/<repo>/<issue_id>/.farm/
+     - task_updates.jsonl
+     - task_result.json
+
+                    (Skill) Integrator
+     completed children -> integration branch/PR -> human review
+```
+
+## User Flow (ASCII)
+
+```text
+1) Planner skill creates parent + child tasks in Linear
+2) Human sets one child to Approved
+3) farm run --repo <repo> --issue <child-id> --agent <codex|claude>
+   -> create worktree
+   -> start tmux + launch agent
+   -> move Linear: Approved -> Coding
+   -> write TaskUpdate(starting)
+4) farm update ... --phase running --summary "..."
+   -> append heartbeat TaskUpdate(s)
+5) farm finish ... --outcome completed|canceled|blocked|failed
+   -> move Linear: completed -> Done (else -> Canceled)
+   -> append terminal TaskUpdate
+   -> write task_result.json
+6) farm status ... shows Linear state + latest update + result summary
+7) Integrator skill consolidates completed children into one final PR
+```
+
 ## What Farm Is Not
 
 1. Not a planning engine in runtime code.
