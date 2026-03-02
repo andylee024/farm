@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from farm.core.errors import ExternalCommandError
+from farm.support.errors import ExternalCommandError
 
 
 def run_tmux(args: list[str]) -> str:
@@ -13,8 +13,3 @@ def run_tmux(args: list[str]) -> str:
     if result.returncode != 0:
         raise ExternalCommandError(result.stderr.strip() or "tmux command failed")
     return result.stdout.strip()
-
-
-def create_session_command(*, session: str, cwd: str, command: str) -> list[str]:
-    return ["tmux", "new-session", "-d", "-s", session, "-c", cwd, command]
-

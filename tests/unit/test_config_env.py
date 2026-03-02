@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from farm.config import load_dotenv_file
+from farm.support.config import load_dotenv_file
 
 
 def test_load_dotenv_file_loads_values(tmp_path: Path) -> None:
@@ -54,4 +54,3 @@ def test_load_dotenv_file_can_override(tmp_path: Path) -> None:
     _ = load_dotenv_file(dotenv_path, override=True)
 
     assert os.environ["LINEAR_API_KEY"] == "from-dotenv"
-

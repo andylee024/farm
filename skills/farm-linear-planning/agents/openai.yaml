@@ -1,4 +1,0 @@
-interface:
-  display_name: "Farm Linear Planning (Alias)"
-  short_description: "Deprecated alias. Use feature-task-decomposition."
-  default_prompt: "Use feature-task-decomposition for decomposition and planning workflows."
