@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
 
 from farm.adapters.linear import LinearClient
-from farm.runtime.models import AgentKind
+from farm.runtime.models import Agent
 from farm.runtime.runner import TaskRunner
 from farm.support.config import FarmConfig, load_config, load_dotenv_file
 from farm.support.errors import LinearApiError
@@ -17,6 +19,31 @@ app = typer.Typer(no_args_is_help=True, help="Farm single-task runtime kernel.")
 
 def _echo(message: str) -> None:
     typer.echo(message)
+
+
+def _parse_iso_utc(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _age_text(value: str | None) -> str:
+    if value is None:
+        return "-"
+    ts = _parse_iso_utc(value)
+    if ts is None:
+        return "-"
+    age_seconds = int((datetime.now(timezone.utc) - ts).total_seconds())
+    if age_seconds < 0:
+        return "0s"
+    if age_seconds < 60:
+        return f"{age_seconds}s"
+    minutes, seconds = divmod(age_seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m{seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m"
 
 
 def resolve_path_from_cwd_or_parents(path: Path) -> Path:
@@ -56,15 +83,16 @@ def build_linear_client(cfg: FarmConfig) -> LinearClient:
 
 
 def build_runner(config: Path) -> TaskRunner:
-    cfg = load_config_or_raise(config)
-    return TaskRunner(config=cfg, linear_client=build_linear_client(cfg))
+    resolved_config = resolve_config_path(config)
+    cfg = load_config_or_raise(resolved_config)
+    return TaskRunner(config=cfg, config_path=resolved_config, linear_client=build_linear_client(cfg))
 
 
 @app.command()
 def run(
     issue: str = typer.Option(..., "--issue", help="Linear issue id."),
     repo: str = typer.Option(..., "--repo", help="Repo key from config."),
-    agent: AgentKind = typer.Option(AgentKind.CODEX, "--agent", help="Agent model family."),
+    agent: Agent = typer.Option(Agent.CODEX, "--agent", help="Agent model family."),
     config: Path = typer.Option(Path("config.yaml"), "--config", help="Path to config yaml."),
 ) -> None:
     """Launch a single approved issue into Coding and start a task session."""
@@ -141,6 +169,81 @@ def status(
     _echo(f"status: result_summary={snapshot['result_summary'] or '-'}")
     _echo(f"status: updates={snapshot['updates']}")
     _echo(f"status: result={snapshot['result']}")
+
+
+@app.command()
+def pulse(
+    repo: str = typer.Option(..., "--repo", help="Repo key from config."),
+    config: Path = typer.Option(Path("config.yaml"), "--config", help="Path to config yaml."),
+) -> None:
+    """Show lightweight task observability snapshot for a repo."""
+    try:
+        rows = build_runner(config).pulse(repo=repo)
+    except (ValueError, LinearApiError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    if not rows:
+        _echo(f"pulse: repo={repo} tasks=0")
+        return
+
+    _echo(f"pulse: repo={repo} tasks={len(rows)}")
+    for row in rows:
+        _echo(
+            "pulse: "
+            f"issue={row['issue_id']} "
+            f"state={row['linear_state'] or '-'} "
+            f"phase={row['update_phase'] or '-'} "
+            f"outcome={row['outcome'] or '-'} "
+            f"session_alive={row['session_alive']}"
+        )
+
+
+@app.command()
+def watch(
+    repo: str = typer.Option(..., "--repo", help="Repo key from config."),
+    config: Path = typer.Option(Path("config.yaml"), "--config", help="Path to config yaml."),
+    interval: float = typer.Option(1.5, "--interval", min=0.2, help="Refresh interval seconds."),
+    lines: int = typer.Option(3, "--lines", min=1, max=20, help="Tail lines per session."),
+    duration: float = typer.Option(0.0, "--duration", min=0.0, help="Seconds to run; 0 = forever."),
+    clear: bool = typer.Option(True, "--clear/--no-clear", help="Clear screen between refreshes."),
+) -> None:
+    """Watch live task snapshot with recent session output."""
+    try:
+        runner = build_runner(config)
+    except (ValueError, LinearApiError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    started = time.monotonic()
+    while True:
+        try:
+            rows = runner.watch(repo=repo, tail_lines=lines)
+        except (ValueError, LinearApiError) as exc:
+            raise typer.BadParameter(str(exc)) from exc
+
+        if clear:
+            _echo("\033[2J\033[H")
+        now_text = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+        _echo(f"watch: repo={repo} tasks={len(rows)} now={now_text}")
+        for row in rows:
+            label = row.get("issue_identifier") or row["issue_id"]
+            _echo(
+                f"{label} "
+                f"state={row['linear_state'] or '-'} "
+                f"phase={row['update_phase'] or '-'} "
+                f"age={_age_text(row['update_ts'])} "
+                f"outcome={row['outcome'] or '-'} "
+                f"session={'alive' if row['session_alive'] else 'dead'}"
+            )
+            tail_lines = row.get("tail_lines")
+            if isinstance(tail_lines, list) and tail_lines:
+                for line in tail_lines[-lines:]:
+                    _echo(f"  > {line}")
+            else:
+                _echo("  > -")
+
+        if duration > 0 and (time.monotonic() - started) >= duration:
+            return
+        time.sleep(interval)
 
 
 def main() -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from farm.adapters.linear import LinearIssue
-from farm.runtime.models import AgentKind
+from farm.runtime.models import Agent
 from farm.runtime.runner import TaskRunner
 from farm.support.config import FarmConfig
 
@@ -17,7 +17,7 @@ class FakeLinearClient:
         self.moved: list[tuple[str, str]] = []
 
     def get_issue(self, issue_id: str) -> LinearIssue:
-        assert issue_id == self.issue.id
+        assert issue_id in {self.issue.id, self.issue.identifier}
         return self.issue
 
     def move_issue_to_status(self, issue_id: str, status_name: str) -> None:
@@ -87,7 +87,7 @@ def test_run_moves_issue_to_coding_and_writes_update(tmp_path: Path) -> None:
 
     runner = TaskRunner(config=cfg, linear_client=linear, git_runner=fake_git, tmux_runner=fake_tmux)
 
-    result = runner.run(issue_id="FARM-123", repo="farm", agent=AgentKind.CODEX)
+    result = runner.run(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)
 
     assert linear.moved == [("FARM-123", "Coding")]
     assert result["branch"] == "farm/farm-123"
@@ -104,7 +104,7 @@ def test_run_requires_approved_state(tmp_path: Path) -> None:
     runner = TaskRunner(config=cfg, linear_client=linear)
 
     with pytest.raises(ValueError, match="must be in Approved"):
-        runner.run(issue_id="FARM-123", repo="farm", agent=AgentKind.CODEX)
+        runner.run(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)
 
 
 
@@ -147,14 +147,23 @@ def test_status_returns_snapshot(tmp_path: Path) -> None:
 def test_startup_command_uses_dangerous_flags_by_default(tmp_path: Path) -> None:
     cfg = build_config(tmp_path, dangerous_bypass_permissions=True)
     linear = FakeLinearClient(make_issue(state="Approved"))
-    runner = TaskRunner(config=cfg, linear_client=linear)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("worktree_root: /tmp\nrepos: {}\n", encoding="utf-8")
+    runner = TaskRunner(config=cfg, config_path=config_path, linear_client=linear)
 
-    codex_cmd = runner._startup_command(issue_id="FARM-123", agent=AgentKind.CODEX)  # noqa: SLF001
-    claude_cmd = runner._startup_command(issue_id="FARM-123", agent=AgentKind.CLAUDE)  # noqa: SLF001
+    codex_cmd = runner._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)  # noqa: SLF001
+    claude_cmd = runner._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CLAUDE)  # noqa: SLF001
 
-    assert codex_cmd.startswith("codex ")
+    assert codex_cmd.startswith("bash -lc ")
+    assert "codex " in codex_cmd
+    assert " exec " in codex_cmd
     assert "--dangerously-bypass-approvals-and-sandbox" in codex_cmd
-    assert claude_cmd.startswith("claude ")
+    assert "--outcome completed" in codex_cmd
+    assert "--outcome failed" in codex_cmd
+    assert str(config_path.resolve()) in codex_cmd
+    assert claude_cmd.startswith("bash -lc ")
+    assert "claude " in claude_cmd
+    assert " --print " in claude_cmd
     assert "--dangerously-skip-permissions" in claude_cmd
 
 
@@ -163,8 +172,102 @@ def test_startup_command_can_disable_dangerous_flags(tmp_path: Path) -> None:
     linear = FakeLinearClient(make_issue(state="Approved"))
     runner = TaskRunner(config=cfg, linear_client=linear)
 
-    codex_cmd = runner._startup_command(issue_id="FARM-123", agent=AgentKind.CODEX)  # noqa: SLF001
-    claude_cmd = runner._startup_command(issue_id="FARM-123", agent=AgentKind.CLAUDE)  # noqa: SLF001
+    codex_cmd = runner._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)  # noqa: SLF001
+    claude_cmd = runner._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CLAUDE)  # noqa: SLF001
 
     assert "--dangerously-bypass-approvals-and-sandbox" not in codex_cmd
     assert "--dangerously-skip-permissions" not in claude_cmd
+
+
+def test_status_uses_canonical_issue_id_for_paths(tmp_path: Path) -> None:
+    cfg = build_config(tmp_path)
+    linear = FakeLinearClient(
+        LinearIssue(
+            id="uuid-123",
+            identifier="FARM-123",
+            title="Test",
+            description="desc",
+            parent_id="PARENT-1",
+            state_name="Coding",
+            project_name="farm",
+        )
+    )
+    runner = TaskRunner(config=cfg, linear_client=linear)
+
+    runner.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
+    snapshot = runner.status(issue_id="FARM-123", repo="farm")
+
+    assert snapshot["issue_id"] == "uuid-123"
+    assert "/uuid-123/.farm/" in snapshot["updates"]
+
+
+def test_pulse_returns_lightweight_snapshot(tmp_path: Path) -> None:
+    cfg = build_config(tmp_path)
+    linear = FakeLinearClient(
+        LinearIssue(
+            id="uuid-123",
+            identifier="FARM-123",
+            title="Test",
+            description="desc",
+            parent_id="PARENT-1",
+            state_name="Coding",
+            project_name="farm",
+        )
+    )
+    tmux_calls: list[list[str]] = []
+
+    def fake_tmux(args: list[str]) -> str:
+        tmux_calls.append(args)
+        return ""
+
+    runner = TaskRunner(config=cfg, linear_client=linear, tmux_runner=fake_tmux)
+    runner.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
+
+    rows = runner.pulse(repo="farm")
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["issue_id"] == "uuid-123"
+    assert row["linear_state"] == "Coding"
+    assert row["update_phase"] == "running"
+    assert row["session_alive"] is True
+    assert tmux_calls == [["has-session", "-t", "farm-uuid-123"]]
+
+
+def test_watch_includes_recent_tmux_output(tmp_path: Path) -> None:
+    cfg = build_config(tmp_path)
+    linear = FakeLinearClient(
+        LinearIssue(
+            id="uuid-123",
+            identifier="FARM-123",
+            title="Test",
+            description="desc",
+            parent_id="PARENT-1",
+            state_name="Coding",
+            project_name="farm",
+        )
+    )
+    tmux_calls: list[list[str]] = []
+
+    def fake_tmux(args: list[str]) -> str:
+        tmux_calls.append(args)
+        if args[:2] == ["has-session", "-t"]:
+            return ""
+        if args[:4] == ["capture-pane", "-p", "-t", "farm-uuid-123"]:
+            return "line one\nline two\n"
+        raise AssertionError(f"Unexpected tmux call: {args}")
+
+    runner = TaskRunner(config=cfg, linear_client=linear, tmux_runner=fake_tmux)
+    runner.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
+
+    rows = runner.watch(repo="farm", tail_lines=2)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["issue_identifier"] == "FARM-123"
+    assert row["session_alive"] is True
+    assert row["tail_lines"] == ["line one", "line two"]
+    assert tmux_calls == [
+        ["has-session", "-t", "farm-uuid-123"],
+        ["capture-pane", "-p", "-t", "farm-uuid-123", "-S", "-2"],
+    ]

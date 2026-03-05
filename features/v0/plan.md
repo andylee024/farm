@@ -73,12 +73,14 @@ When children are complete, integrator skill:
 
 ## Runtime Contracts
 
-Farm runtime supports only four operations:
+Farm runtime supports only six operations:
 
 1. `run(issue_id, repo, agent)`
 2. `update(issue_id, repo, phase, summary)`
 3. `finish(issue_id, repo, outcome, summary, pr_url=None)`
 4. `status(issue_id, repo)`
+5. `pulse(repo)`
+6. `watch(repo)`
 
 No scheduler, no queue manager, no local state machine, no registry DB.
 

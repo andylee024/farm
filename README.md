@@ -72,14 +72,16 @@ Farm solves this by:
    -> start tmux + launch agent
    -> move Linear: Approved -> Coding
    -> write TaskUpdate(starting)
+   -> when agent session exits: auto-finish task (Done on success, Canceled on failure)
 4) farm update ... --phase running --summary "..."
    -> append heartbeat TaskUpdate(s)
-5) farm finish ... --outcome completed|canceled|blocked|failed
+5) farm finish ... --outcome completed|canceled|blocked|failed (optional manual override)
    -> move Linear: completed -> Done (else -> Canceled)
    -> append terminal TaskUpdate
    -> write task_result.json
-6) farm status ... shows Linear state + latest update + result summary
-7) Integrator skill consolidates completed children into one final PR
+6) farm status ... shows one task state; farm pulse ... shows repo task snapshot
+7) farm watch ... shows live snapshot + recent session output lines
+8) Integrator skill consolidates completed children into one final PR
 ```
 
 ## What Farm Is Not
@@ -105,6 +107,8 @@ No queue scheduler, local lifecycle state machine, or registry database in the c
 - `farm update` - append a task update
 - `farm finish` - finalize with outcome
 - `farm status` - read Linear + local artifacts summary
+- `farm pulse` - lightweight observability snapshot for all started tasks in a repo
+- `farm watch` - terminal UI for live status + recent tmux output per task
 
 ## Documentation
 

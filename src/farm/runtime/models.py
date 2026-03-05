@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-class AgentKind(str, Enum):
+class Agent(str, Enum):
     CODEX = "codex"
     CLAUDE = "claude"
 
