@@ -1,4 +1,4 @@
 interface:
   display_name: "Feature Task Decomposition"
-  short_description: "Decompose feature intent into atomic Linear child tasks and execute one approved task at a time with Farm."
-  default_prompt: "Use this skill to break feature intent into atomic tasks, approve one child in Linear, and run it with farm run/update/finish/status."
+  short_description: "Create concise, objective parent/child Linear tasks with context-first execution guidance and evidence-based completion."
+  default_prompt: "Use this skill to decompose feature intent into one parent and atomic child tasks. Keep each child spec concise, require the agent to read listed docs/code paths first, include objective acceptance checklist, and require evidence mapping at completion. Then approve one child and run it with farm run/update/finish/status/watch."

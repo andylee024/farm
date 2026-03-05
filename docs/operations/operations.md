@@ -52,15 +52,20 @@ farm update --config "$FARM_CONFIG" --repo "$REPO_KEY" --issue "<child-issue-id>
 farm finish --config "$FARM_CONFIG" --repo "$REPO_KEY" --issue "<child-issue-id>" --outcome completed --summary "Complete" --pr-url "<optional-pr-url>"
 farm finish --config "$FARM_CONFIG" --repo "$REPO_KEY" --issue "<child-issue-id>" --outcome canceled --summary "Stop reason"
 farm status --config "$FARM_CONFIG" --repo "$REPO_KEY" --issue "<child-issue-id>"
+farm pulse --config "$FARM_CONFIG" --repo "$REPO_KEY"
+farm watch --config "$FARM_CONFIG" --repo "$REPO_KEY" --interval 1.5 --lines 3
 ```
 
 ## Lifecycle
 
 1. Human sets child issue to `Approved` in Linear.
 2. `farm run` starts work and moves issue to `Coding`.
-3. Optional `farm update` adds progress checkpoints.
-4. `farm finish --outcome completed` writes final result and moves issue to `Done`.
-5. `farm finish --outcome canceled` writes final result and moves issue to `Canceled`.
+3. Agent session exit auto-runs `farm finish`:
+   - exit code `0` -> `Done` (`outcome=completed`)
+   - non-zero exit -> `Canceled` (`outcome=failed`)
+4. Optional `farm update` adds progress checkpoints.
+5. `farm finish --outcome completed` can be used as a manual override and moves issue to `Done`.
+6. `farm finish --outcome canceled` can be used as a manual override and moves issue to `Canceled`.
 
 ## Linear Status Policy
 
@@ -143,6 +148,29 @@ A child issue is done when:
 2. `task_result.json` exists with `outcome="completed"`
 3. Summary/evidence is sufficient for human review
 
+## Lightweight Observability
+
+Use two commands:
+
+1. `farm status` for one task
+2. `farm pulse` for all started tasks in one repo
+3. `farm watch` for live terminal snapshot + recent output lines
+
+`farm pulse` shows per-task:
+
+1. Issue id
+2. Linear state
+3. Latest update phase
+4. Final outcome (if available)
+5. tmux session liveness
+
+`farm watch` continuously refreshes and shows:
+
+1. Human-friendly task label (`identifier` when available)
+2. Current state/phase/outcome
+3. Age since last update
+4. Last N tmux pane lines per live session
+
 ## Review Handoff
 
 Reviewer checks:
@@ -162,8 +190,13 @@ Integration handoff gates:
 
 `farm run` starts a tmux session and launches the selected agent CLI directly:
 
-1. Codex: `codex --model <model> --dangerously-bypass-approvals-and-sandbox`
-2. Claude: `claude --model <model> --dangerously-skip-permissions`
+1. Codex: `codex exec --model <model> --dangerously-bypass-approvals-and-sandbox "<prompt>"`
+2. Claude: `claude --model <model> --print --dangerously-skip-permissions "<prompt>"`
+
+After agent exit, Farm automatically calls `finish`:
+
+1. Success -> `outcome=completed` -> `Done`
+2. Failure -> `outcome=failed` -> `Canceled`
 
 Default behavior uses bypass flags. To disable both, set:
 

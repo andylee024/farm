@@ -6,7 +6,10 @@ Before execution:
 
 - Define parent outcome.
 - Define atomic child issues.
-- Confirm deterministic checks.
+- For each child, include:
+  - `Context To Read First` (docs + file paths)
+  - objective `Acceptance Criteria` checklist
+  - explicit `Evidence Required` checklist
 
 ## 2) Approve One Child In Linear
 
@@ -18,13 +21,19 @@ Set target child issue state to `Approved`.
 farm run --config config.yaml --repo <repo-key> --issue <child-issue-id>
 ```
 
-## 4) Optional Progress Updates
+## 4) Observe While Running
+
+```bash
+farm watch --config config.yaml --repo <repo-key>
+```
+
+## 5) Optional Progress Updates
 
 ```bash
 farm update --config config.yaml --repo <repo-key> --issue <child-issue-id> --phase running --summary "..."
 ```
 
-## 5) Finish
+## 6) Finish
 
 ```bash
 farm finish --config config.yaml --repo <repo-key> --issue <child-issue-id> --outcome completed --summary "..." --pr-url "<optional-pr-url>"
@@ -32,7 +41,7 @@ farm finish --config config.yaml --repo <repo-key> --issue <child-issue-id> --ou
 farm finish --config config.yaml --repo <repo-key> --issue <child-issue-id> --outcome canceled --summary "..."
 ```
 
-## 6) Check Snapshot
+## 7) Check Snapshot
 
 ```bash
 farm status --config config.yaml --repo <repo-key> --issue <child-issue-id>

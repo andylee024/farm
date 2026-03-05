@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import shutil
+import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +15,7 @@ from typing import Any
 from farm.adapters.git import run_git
 from farm.adapters.linear import LinearClient, LinearIssue, normalize_state_name
 from farm.adapters.tmux import run_tmux
-from farm.runtime.models import AgentKind, TaskResult, TaskUpdate
+from farm.runtime.models import Agent, TaskResult, TaskUpdate
 from farm.runtime.paths import task_paths
 from farm.support.config import FarmConfig
 
@@ -33,21 +36,24 @@ class TaskRunner:
         *,
         config: FarmConfig,
         linear_client: LinearClient,
+        config_path: Path | None = None,
         git_runner: GitRunner = run_git,
         tmux_runner: TmuxRunner = run_tmux,
     ):
         self.config = config
         self.linear_client = linear_client
+        self.config_path = config_path
         self.git_runner = git_runner
         self.tmux_runner = tmux_runner
 
-    def run(self, *, issue_id: str, repo: str, agent: AgentKind) -> dict[str, str]:
+    def run(self, *, issue_id: str, repo: str, agent: Agent) -> dict[str, str]:
         repo_cfg = self._repo_cfg(repo)
         issue = self.linear_client.get_issue(issue_id)
+        resolved_issue_id = issue.id
         self._require_run_allowed(issue)
         self._require_issue_repo(issue, repo)
 
-        paths = task_paths(config=self.config, repo=repo, issue_id=issue_id)
+        paths = task_paths(config=self.config, repo=repo, issue_id=resolved_issue_id)
         worktree = paths.worktree
         updates_path = paths.updates
         branch = paths.branch
@@ -66,14 +72,14 @@ class TaskRunner:
         self._start_agent_session(
             session=session,
             worktree=worktree,
-            startup_command=self._startup_command(issue_id=issue_id, agent=agent),
+            startup_command=self._startup_command(issue_id=resolved_issue_id, repo=repo, agent=agent),
         )
 
-        self.linear_client.move_issue_to_status(issue_id, "Coding")
+        self.linear_client.move_issue_to_status(resolved_issue_id, "Coding")
         self._append_update(
             updates_path,
             TaskUpdate(
-                issue_id=issue_id,
+                issue_id=resolved_issue_id,
                 repo=repo,
                 phase="starting",
                 summary="Created worktree and started session",
@@ -82,7 +88,7 @@ class TaskRunner:
         )
 
         return {
-            "issue_id": issue_id,
+            "issue_id": resolved_issue_id,
             "repo": repo,
             "worktree": str(worktree),
             "branch": branch,
@@ -95,13 +101,14 @@ class TaskRunner:
     def update(self, *, issue_id: str, repo: str, phase: str, summary: str) -> str:
         _ = self._repo_cfg(repo)
         issue = self.linear_client.get_issue(issue_id)
+        resolved_issue_id = issue.id
         self._require_issue_repo(issue, repo)
-        paths = task_paths(config=self.config, repo=repo, issue_id=issue_id)
+        paths = task_paths(config=self.config, repo=repo, issue_id=resolved_issue_id)
         updates_path = paths.updates
         self._append_update(
             updates_path,
             TaskUpdate(
-                issue_id=issue_id,
+                issue_id=resolved_issue_id,
                 repo=repo,
                 phase=phase,
                 summary=summary,
@@ -121,6 +128,7 @@ class TaskRunner:
     ) -> str:
         _ = self._repo_cfg(repo)
         issue = self.linear_client.get_issue(issue_id)
+        resolved_issue_id = issue.id
         self._require_issue_repo(issue, repo)
         state = normalize_state_name(issue.state_name)
         if state not in {"coding", "done", "canceled"}:
@@ -134,9 +142,9 @@ class TaskRunner:
             raise ValueError("`outcome` must be one of: completed, canceled, blocked, failed")
 
         target_status = "Done" if normalized_outcome == "completed" else "Canceled"
-        self.linear_client.move_issue_to_status(issue_id, target_status)
+        self.linear_client.move_issue_to_status(resolved_issue_id, target_status)
 
-        paths = task_paths(config=self.config, repo=repo, issue_id=issue_id)
+        paths = task_paths(config=self.config, repo=repo, issue_id=resolved_issue_id)
         updates_path = paths.updates
         result_path = paths.result
 
@@ -144,7 +152,7 @@ class TaskRunner:
         self._append_update(
             updates_path,
             TaskUpdate(
-                issue_id=issue_id,
+                issue_id=resolved_issue_id,
                 repo=repo,
                 phase=terminal_phase,
                 summary=summary,
@@ -154,7 +162,7 @@ class TaskRunner:
 
         started_at = self._first_update_ts(updates_path) or _now_iso()
         result = TaskResult(
-            issue_id=issue_id,
+            issue_id=resolved_issue_id,
             repo=repo,
             outcome=normalized_outcome,
             summary=summary,
@@ -168,9 +176,10 @@ class TaskRunner:
     def status(self, *, issue_id: str, repo: str) -> dict[str, Any]:
         _ = self._repo_cfg(repo)
         issue = self.linear_client.get_issue(issue_id)
+        resolved_issue_id = issue.id
         self._require_issue_repo(issue, repo)
 
-        paths = task_paths(config=self.config, repo=repo, issue_id=issue_id)
+        paths = task_paths(config=self.config, repo=repo, issue_id=resolved_issue_id)
         updates_path = paths.updates
         result_path = paths.result
 
@@ -178,7 +187,7 @@ class TaskRunner:
         task_result = self._load_result(result_path)
 
         return {
-            "issue_id": issue_id,
+            "issue_id": resolved_issue_id,
             "repo": repo,
             "linear_state": issue.state_name,
             "update_phase": latest_update.phase if latest_update else None,
@@ -190,6 +199,54 @@ class TaskRunner:
             "updates": str(updates_path),
             "result": str(result_path),
         }
+
+    def pulse(self, *, repo: str) -> list[dict[str, Any]]:
+        _ = self._repo_cfg(repo)
+        snapshots: list[dict[str, Any]] = []
+        for issue_id in self._task_issue_ids(repo):
+            paths = task_paths(config=self.config, repo=repo, issue_id=issue_id)
+            latest_update = self._latest_update(paths.updates)
+            task_result = self._load_result(paths.result)
+
+            issue_identifier: str | None = None
+            linear_state: str | None = None
+            try:
+                linear_issue = self.linear_client.get_issue(issue_id)
+                issue_identifier = linear_issue.identifier
+                linear_state = linear_issue.state_name
+            except Exception:  # noqa: BLE001
+                linear_state = None
+
+            snapshots.append(
+                {
+                    "issue_id": issue_id,
+                    "issue_identifier": issue_identifier,
+                    "repo": repo,
+                    "linear_state": linear_state,
+                    "update_phase": latest_update.phase if latest_update else None,
+                    "update_ts": latest_update.ts if latest_update else None,
+                    "outcome": task_result.outcome if task_result else None,
+                    "session": paths.session,
+                    "session_alive": self._session_running(paths.session),
+                    "updates": str(paths.updates),
+                    "result": str(paths.result),
+                }
+            )
+        return snapshots
+
+    def watch(self, *, repo: str, tail_lines: int = 4) -> list[dict[str, Any]]:
+        rows = self.pulse(repo=repo)
+        enriched: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            tail: list[str] = []
+            if bool(row.get("session_alive")):
+                session = row.get("session")
+                if isinstance(session, str):
+                    tail = self._session_tail(session=session, tail_lines=tail_lines)
+            item["tail_lines"] = tail
+            enriched.append(item)
+        return enriched
 
     def _repo_cfg(self, repo: str):
         repo_cfg = self.config.repos.get(repo)
@@ -241,30 +298,116 @@ class TaskRunner:
             ]
         )
 
-    def _startup_command(self, *, issue_id: str, agent: AgentKind) -> str:
-        args = self._agent_launch_args(issue_id=issue_id, agent=agent)
-        return shlex.join(args)
+    def _startup_command(self, *, issue_id: str, repo: str, agent: Agent) -> str:
+        agent_command = shlex.join(self._agent_launch_args(issue_id=issue_id, agent=agent))
+        finish_success = shlex.join(
+            self._finish_launch_args(
+                issue_id=issue_id,
+                repo=repo,
+                outcome="completed",
+                summary=f"Agent session ended successfully ({agent.value}).",
+            )
+        )
+        finish_failure = shlex.join(
+            self._finish_launch_args(
+                issue_id=issue_id,
+                repo=repo,
+                outcome="failed",
+                summary=f"Agent session exited non-zero ({agent.value}).",
+            )
+        )
+        script = (
+            f"{agent_command}; "
+            "__farm_exit=$?; "
+            f"if [ $__farm_exit -eq 0 ]; then {finish_success}; else {finish_failure}; fi; "
+            "exit $__farm_exit"
+        )
+        return shlex.join(["bash", "-lc", script])
 
-    def _agent_launch_args(self, *, issue_id: str, agent: AgentKind) -> list[str]:
+    def _agent_launch_args(self, *, issue_id: str, agent: Agent) -> list[str]:
+        binary = self._agent_binary(agent)
         model = self._agent_model(agent)
         prompt = (
             f"Work on Linear issue {issue_id}. "
             "Read AGENTS.md and docs/operations/operations.md first, then execute the scoped task."
         )
-        if agent == AgentKind.CLAUDE:
-            args = ["claude", "--model", model]
+        if agent == Agent.CLAUDE:
+            args = [binary, "--model", model, "--print"]
             if self.config.agent_defaults.dangerous_bypass_permissions:
                 args.append("--dangerously-skip-permissions")
             return [*args, prompt]
-        args = ["codex", "--model", model]
+        args = [binary, "exec", "--model", model]
         if self.config.agent_defaults.dangerous_bypass_permissions:
             args.append("--dangerously-bypass-approvals-and-sandbox")
         return [*args, prompt]
 
-    def _agent_model(self, agent: AgentKind) -> str:
-        if agent == AgentKind.CLAUDE:
+    def _agent_model(self, agent: Agent) -> str:
+        if agent == Agent.CLAUDE:
             return self.config.agent_defaults.claude_model
         return self.config.agent_defaults.codex_model
+
+    @staticmethod
+    def _agent_binary(agent: Agent) -> str:
+        resolved = shutil.which(agent.value)
+        return resolved or agent.value
+
+    def _finish_launch_args(self, *, issue_id: str, repo: str, outcome: str, summary: str) -> list[str]:
+        config_path = self._resolved_config_path_for_subprocess()
+        return [
+            sys.executable,
+            "-m",
+            "farm.cli.commands",
+            "finish",
+            "--config",
+            config_path,
+            "--issue",
+            issue_id,
+            "--repo",
+            repo,
+            "--outcome",
+            outcome,
+            "--summary",
+            summary,
+        ]
+
+    def _resolved_config_path_for_subprocess(self) -> str:
+        if self.config_path is not None:
+            return str(self.config_path.resolve())
+        env_path = os.getenv("FARM_CONFIG")
+        if env_path:
+            return str(Path(env_path).resolve())
+        return str(Path("config.yaml").resolve())
+
+    def _task_issue_ids(self, repo: str) -> list[str]:
+        repo_root = Path(self.config.worktree_root) / repo
+        if not repo_root.exists():
+            return []
+        issue_ids: list[str] = []
+        for child in sorted(repo_root.iterdir()):
+            if not child.is_dir():
+                continue
+            farm_dir = child / ".farm"
+            if (farm_dir / "task_updates.jsonl").exists() or (farm_dir / "task_result.json").exists():
+                issue_ids.append(child.name)
+        return issue_ids
+
+    def _session_running(self, session: str) -> bool:
+        try:
+            self.tmux_runner(["has-session", "-t", session])
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _session_tail(self, *, session: str, tail_lines: int) -> list[str]:
+        if tail_lines < 1:
+            return []
+        try:
+            captured = self.tmux_runner(
+                ["capture-pane", "-p", "-t", session, "-S", f"-{tail_lines}"]
+            )
+        except Exception:  # noqa: BLE001
+            return []
+        return [line for line in captured.splitlines() if line.strip()]
 
     @staticmethod
     def _append_update(path: Path, update: TaskUpdate) -> None:
