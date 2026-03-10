@@ -1,7 +1,7 @@
 # Farm V0 Plan: Minimal Execution Kernel
 
 Status: Draft  
-Last updated: 2026-03-02
+Last updated: 2026-03-10
 
 ## Goal
 
@@ -57,8 +57,8 @@ When children are complete, integrator skill:
 +---------------------------+--------------------+
 |             Farm Runtime Kernel                |
 | run / update / finish / status                 |
-| - create worktree                              |
-| - start tmux session                           |
+| - TaskService lifecycle                        |
+| - TaskRuntime backend                          |
 | - append TaskUpdate                            |
 | - write TaskResult                             |
 +---------------------------+--------------------+
@@ -84,7 +84,7 @@ Farm runtime supports seven operations:
 6. `watch(repo)`
 7. `daemon(repos, poll_interval, max_concurrent, agent)` — polling loop
 
-No local state machine or registry DB. The daemon uses Linear as the queue and worktree existence as the dedup mechanism.
+No local state machine or registry DB. The daemon uses Linear as the queue and task-directory existence as the dedup mechanism.
 
 ## Runtime Dataclasses
 
@@ -149,9 +149,12 @@ src/farm/
     commands.py          # typer entrypoint + command handlers
   runtime/
     models.py            # TaskUpdate, TaskResult, Agent
-    runner.py            # run/update/finish/status orchestration
+    task_service.py      # run/update/finish/status orchestration
+    task_runtime.py      # runtime backend interface
+    tmux_task_runtime.py # local git worktree + tmux backend
+    daytona_task_runtime.py
     daemon.py            # polling loop for auto-launching approved issues
-    paths.py             # deterministic worktree/branch/session naming
+    paths.py             # deterministic artifact paths
   adapters/
     linear.py            # get_issue + move_issue_to_status + list_issues_by_state
     git.py               # shell boundary

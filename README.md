@@ -34,6 +34,8 @@ Farm solves this by:
 
 `farm daemon` is a polling loop that watches Linear for `Approved` issues and auto-launches them. This enables an event-driven split where the planner (e.g. nanoclaw) writes tasks to Linear, and the daemon on the host picks them up and executes them.
 
+Farm treats execution as a pluggable task runtime. Today the default runtime is `TmuxTaskRuntime` (`git worktree + tmux`). The long-term target is to add `DaytonaTaskRuntime` without changing the Linear-driven control plane.
+
 ```bash
 farm daemon --config config.yaml --interval 30 --max-concurrent 1 --agent codex
 ```
@@ -56,7 +58,7 @@ farm daemon --config config.yaml --interval 30 --max-concurrent 1 --agent codex
  |                 Farm Runtime Kernel                |
  |  run / update / finish / status / pulse / watch   |
  |                                                     |
- |  run: git worktree -> tmux session -> agent launch |
+ |  run: TaskService -> TaskRuntime -> agent launch   |
  |  update: append TaskUpdate                          |
  |  finish: write TaskResult + move status            |
  |                                                     |
@@ -79,7 +81,7 @@ Manual mode:
   1) Planner skill creates parent + child tasks in Linear
   2) Human sets one child to Approved
   3) farm run --repo <repo> --issue <child-id> --agent <codex|claude>
-     -> create worktree, start tmux + agent, move Linear to Coding
+     -> provision task runtime, launch agent, move Linear to Coding
   4) farm update ... --phase running --summary "..."
   5) farm finish ... --outcome completed|canceled|blocked|failed (optional manual override)
   6) farm status / pulse / watch for observability
@@ -90,7 +92,7 @@ Daemon mode:
   2) Human sets children to Approved
   3) farm daemon --repo <repo> --agent <codex|claude> --max-concurrent 2
      -> polls Linear every N seconds
-     -> auto-launches Approved issues (up to max-concurrent)
+     -> auto-launches Approved child issues (up to max-concurrent)
      -> skips already-started issues
   4) farm watch for observability
   5) Integrator skill consolidates completed children into one final PR
@@ -108,9 +110,23 @@ Farm runs one issue at a time and writes exactly two artifacts per task:
 1. `task_updates.jsonl` for periodic progress updates
 2. `task_result.json` for final outcome
 
-`farm run` creates a git worktree, starts a tmux session, and launches Codex or Claude in that session.
+`farm run` delegates execution to the configured task runtime. The default runtime creates a git worktree, starts a tmux session, and launches Codex or Claude there.
 
 No queue scheduler, local lifecycle state machine, or registry database in the core flow.
+
+## Task Runtime Architecture
+
+Farm separates orchestration from execution:
+
+1. `TaskService` owns lifecycle policy: validate the Linear issue, move statuses, write task artifacts, and assemble observability snapshots.
+2. `TaskRuntime` owns execution substrate details: provision a workspace, launch the agent, report liveness, and tail recent output.
+
+Current runtime backends:
+
+- `TmuxTaskRuntime`: local `git worktree + tmux`
+- `DaytonaTaskRuntime`: placeholder for a future remote workspace backend
+
+This keeps the Linear control plane stable while allowing the execution substrate to change underneath it.
 
 ## CLI Surface
 
@@ -119,8 +135,10 @@ No queue scheduler, local lifecycle state machine, or registry database in the c
 - `farm finish` - finalize with outcome
 - `farm status` - read Linear + local artifacts summary
 - `farm pulse` - lightweight observability snapshot for all started tasks in a repo
-- `farm watch` - terminal UI for live status + recent tmux output per task
+- `farm watch` - terminal UI for live status + recent runtime output per task
 - `farm daemon` - poll Linear and auto-launch approved issues
+
+The daemon only launches approved child issues. If `--agent` is omitted, it uses `daemon.default_agent` from config.
 
 ## Documentation
 

@@ -4,6 +4,8 @@ repos:
     default_branch: main
     test_command: "pytest -v"
 worktree_root: /Users/andylee/Projects/worktrees
+task_runtime:
+  provider: tmux
 agent_defaults:
   codex_model: gpt-5.3-codex
   claude_model: claude-opus-4.5

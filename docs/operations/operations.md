@@ -1,7 +1,7 @@
 # Farm Operations (Canonical)
 
 Status: Active
-Last updated: 2026-03-09
+Last updated: 2026-03-10
 
 ## Purpose
 
@@ -74,11 +74,18 @@ farm daemon --config "$FARM_CONFIG" [--repo "$REPO_KEY"] --interval 30 --max-con
 
 1. `farm daemon` starts a polling loop on the host.
 2. Every `--interval` seconds, it queries Linear for `Approved` issues across configured repos (or a single `--repo`).
-3. For each Approved issue without an existing worktree, it calls `farm run` internally.
+3. For each Approved child issue without an existing task directory, it calls `farm run` internally.
 4. Respects `--max-concurrent` (default 1) to limit parallel tasks.
 5. Stops gracefully on SIGINT/SIGTERM.
 
 This enables an event-driven split: a planner (e.g. nanoclaw in a container) writes tasks to Linear, and the daemon running on the host auto-executes them with full filesystem and agent access.
+
+Farm control-plane logic is separate from the task runtime backend. The default backend is `TmuxTaskRuntime` (`git worktree + tmux`). A future `DaytonaTaskRuntime` can replace local execution without changing the Linear lifecycle contract.
+
+Task-runtime boundary:
+
+1. `TaskService` owns lifecycle policy, Linear status transitions, artifact writes, and observability snapshots.
+2. `TaskRuntime` owns workspace provisioning, agent process launch, liveness checks, and output tailing.
 
 ## Linear Status Policy
 
@@ -162,7 +169,7 @@ A child issue is done when:
 
 ## Lightweight Observability
 
-Use two commands:
+Use three commands:
 
 1. `farm status` for one task
 2. `farm pulse` for all started tasks in one repo
@@ -172,16 +179,18 @@ Use two commands:
 
 1. Issue id
 2. Linear state
-3. Latest update phase
-4. Final outcome (if available)
-5. tmux session liveness
+3. Task runtime type/handle
+4. Latest update phase
+5. Final outcome (if available)
+6. Task runtime liveness
 
 `farm watch` continuously refreshes and shows:
 
 1. Human-friendly task label (`identifier` when available)
 2. Current state/phase/outcome
-3. Age since last update
-4. Last N tmux pane lines per live session
+3. Runtime handle / workspace metadata
+4. Age since last update
+5. Last N output lines for the active task runtime
 
 ## Review Handoff
 
@@ -200,7 +209,7 @@ Integration handoff gates:
 
 ## Agent Launch Permissions
 
-`farm run` starts a tmux session and launches the selected agent CLI directly:
+`farm run` delegates execution to the configured task runtime. With the default `TmuxTaskRuntime`, Farm starts a tmux session and launches the selected agent CLI directly:
 
 1. Codex: `codex exec --model <model> --dangerously-bypass-approvals-and-sandbox "<prompt>"`
 2. Claude: `claude --model <model> --print --dangerously-skip-permissions "<prompt>"`
@@ -226,9 +235,13 @@ daemon:
   poll_interval: 30        # seconds between Linear polls
   max_concurrent: 1        # max parallel agent sessions
   default_agent: codex     # codex or claude
+
+task_runtime:
+  provider: tmux           # tmux or daytona
 ```
 
 CLI flags override config values. Omit `--repo` to poll all repos in config.
+Omit `--agent` to use `daemon.default_agent`.
 
 ```bash
 # Poll all repos, use config defaults

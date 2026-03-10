@@ -7,7 +7,8 @@ import pytest
 
 from farm.adapters.linear import LinearIssue
 from farm.runtime.models import Agent
-from farm.runtime.runner import TaskRunner
+from farm.runtime.task_service import TaskService
+from farm.runtime.tmux_task_runtime import TmuxTaskRuntime
 from farm.support.config import FarmConfig
 
 
@@ -33,7 +34,6 @@ class FakeLinearClient:
         )
 
 
-
 def build_config(tmp_path: Path, *, dangerous_bypass_permissions: bool = True) -> FarmConfig:
     repo_root = tmp_path / "repos" / "farm"
     repo_root.mkdir(parents=True, exist_ok=True)
@@ -56,7 +56,6 @@ def build_config(tmp_path: Path, *, dangerous_bypass_permissions: bool = True) -
     )
 
 
-
 def make_issue(*, state: str = "Approved", project: str = "farm") -> LinearIssue:
     return LinearIssue(
         id="FARM-123",
@@ -67,7 +66,6 @@ def make_issue(*, state: str = "Approved", project: str = "farm") -> LinearIssue
         state_name=state,
         project_name=project,
     )
-
 
 
 def test_run_moves_issue_to_coding_and_writes_update(tmp_path: Path) -> None:
@@ -85,36 +83,69 @@ def test_run_moves_issue_to_coding_and_writes_update(tmp_path: Path) -> None:
         tmux_calls.append(args)
         return ""
 
-    runner = TaskRunner(config=cfg, linear_client=linear, git_runner=fake_git, tmux_runner=fake_tmux)
+    service = TaskService(
+        config=cfg,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(git_runner=fake_git, tmux_runner=fake_tmux),
+    )
 
-    result = runner.run(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)
+    result = service.run(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)
 
     assert linear.moved == [("FARM-123", "Coding")]
-    assert result["branch"] == "farm/farm-123"
-    assert result["session"] == "farm-farm-123"
+    assert result["runtime"] == "tmux"
+    assert result["runtime_branch"] == "farm/farm-123"
+    assert result["runtime_handle"] == "farm-farm-123"
     assert Path(result["updates"]).exists()
     assert git_calls and "worktree" in git_calls[0]
     assert tmux_calls and "new-session" in tmux_calls[0]
 
 
-
 def test_run_requires_approved_state(tmp_path: Path) -> None:
     cfg = build_config(tmp_path)
     linear = FakeLinearClient(make_issue(state="Backlog"))
-    runner = TaskRunner(config=cfg, linear_client=linear)
+    service = TaskService(
+        config=cfg,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(),
+    )
 
     with pytest.raises(ValueError, match="must be in Approved"):
-        runner.run(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)
+        service.run(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)
 
+
+def test_run_requires_child_issue(tmp_path: Path) -> None:
+    cfg = build_config(tmp_path)
+    linear = FakeLinearClient(make_issue(state="Approved"))
+    linear.issue = LinearIssue(
+        id="FARM-123",
+        identifier="FARM-123",
+        title="Test",
+        description="desc",
+        parent_id=None,
+        state_name="Approved",
+        project_name="farm",
+    )
+    service = TaskService(
+        config=cfg,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(),
+    )
+
+    with pytest.raises(ValueError, match="must be a child issue"):
+        service.run(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)
 
 
 def test_finish_completed_writes_result(tmp_path: Path) -> None:
     cfg = build_config(tmp_path)
     linear = FakeLinearClient(make_issue(state="Coding"))
-    runner = TaskRunner(config=cfg, linear_client=linear)
+    service = TaskService(
+        config=cfg,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(),
+    )
 
-    runner.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
-    result_path = runner.finish(
+    service.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
+    result_path = service.finish(
         issue_id="FARM-123",
         repo="farm",
         outcome="completed",
@@ -129,17 +160,22 @@ def test_finish_completed_writes_result(tmp_path: Path) -> None:
     assert payload["pr_url"] == "https://example.com/pr/1"
 
 
-
 def test_status_returns_snapshot(tmp_path: Path) -> None:
     cfg = build_config(tmp_path)
     linear = FakeLinearClient(make_issue(state="Coding"))
-    runner = TaskRunner(config=cfg, linear_client=linear)
+    service = TaskService(
+        config=cfg,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(),
+    )
 
-    runner.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
-    snapshot = runner.status(issue_id="FARM-123", repo="farm")
+    service.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
+    snapshot = service.status(issue_id="FARM-123", repo="farm")
 
     assert snapshot["issue_id"] == "FARM-123"
     assert snapshot["linear_state"] == "Coding"
+    assert snapshot["runtime"] == "tmux"
+    assert snapshot["runtime_handle"] == "farm-farm-123"
     assert snapshot["update_phase"] == "running"
     assert snapshot["update_summary"] == "working"
 
@@ -149,10 +185,15 @@ def test_startup_command_uses_dangerous_flags_by_default(tmp_path: Path) -> None
     linear = FakeLinearClient(make_issue(state="Approved"))
     config_path = tmp_path / "config.yaml"
     config_path.write_text("worktree_root: /tmp\nrepos: {}\n", encoding="utf-8")
-    runner = TaskRunner(config=cfg, config_path=config_path, linear_client=linear)
+    service = TaskService(
+        config=cfg,
+        config_path=config_path,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(),
+    )
 
-    codex_cmd = runner._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)  # noqa: SLF001
-    claude_cmd = runner._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CLAUDE)  # noqa: SLF001
+    codex_cmd = service._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)  # noqa: SLF001
+    claude_cmd = service._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CLAUDE)  # noqa: SLF001
 
     assert codex_cmd.startswith("bash -lc ")
     assert "codex " in codex_cmd
@@ -170,10 +211,14 @@ def test_startup_command_uses_dangerous_flags_by_default(tmp_path: Path) -> None
 def test_startup_command_can_disable_dangerous_flags(tmp_path: Path) -> None:
     cfg = build_config(tmp_path, dangerous_bypass_permissions=False)
     linear = FakeLinearClient(make_issue(state="Approved"))
-    runner = TaskRunner(config=cfg, linear_client=linear)
+    service = TaskService(
+        config=cfg,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(),
+    )
 
-    codex_cmd = runner._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)  # noqa: SLF001
-    claude_cmd = runner._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CLAUDE)  # noqa: SLF001
+    codex_cmd = service._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CODEX)  # noqa: SLF001
+    claude_cmd = service._startup_command(issue_id="FARM-123", repo="farm", agent=Agent.CLAUDE)  # noqa: SLF001
 
     assert "--dangerously-bypass-approvals-and-sandbox" not in codex_cmd
     assert "--dangerously-skip-permissions" not in claude_cmd
@@ -192,13 +237,18 @@ def test_status_uses_canonical_issue_id_for_paths(tmp_path: Path) -> None:
             project_name="farm",
         )
     )
-    runner = TaskRunner(config=cfg, linear_client=linear)
+    service = TaskService(
+        config=cfg,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(),
+    )
 
-    runner.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
-    snapshot = runner.status(issue_id="FARM-123", repo="farm")
+    service.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
+    snapshot = service.status(issue_id="FARM-123", repo="farm")
 
     assert snapshot["issue_id"] == "uuid-123"
     assert "/uuid-123/.farm/" in snapshot["updates"]
+    assert snapshot["runtime_handle"] == "farm-uuid-123"
 
 
 def test_pulse_returns_lightweight_snapshot(tmp_path: Path) -> None:
@@ -220,17 +270,22 @@ def test_pulse_returns_lightweight_snapshot(tmp_path: Path) -> None:
         tmux_calls.append(args)
         return ""
 
-    runner = TaskRunner(config=cfg, linear_client=linear, tmux_runner=fake_tmux)
-    runner.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
+    service = TaskService(
+        config=cfg,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(tmux_runner=fake_tmux),
+    )
+    service.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
 
-    rows = runner.pulse(repo="farm")
+    rows = service.pulse(repo="farm")
 
     assert len(rows) == 1
     row = rows[0]
     assert row["issue_id"] == "uuid-123"
     assert row["linear_state"] == "Coding"
+    assert row["runtime"] == "tmux"
     assert row["update_phase"] == "running"
-    assert row["session_alive"] is True
+    assert row["runtime_alive"] is True
     assert tmux_calls == [["has-session", "-t", "farm-uuid-123"]]
 
 
@@ -257,15 +312,19 @@ def test_watch_includes_recent_tmux_output(tmp_path: Path) -> None:
             return "line one\nline two\n"
         raise AssertionError(f"Unexpected tmux call: {args}")
 
-    runner = TaskRunner(config=cfg, linear_client=linear, tmux_runner=fake_tmux)
-    runner.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
+    service = TaskService(
+        config=cfg,
+        linear_client=linear,
+        task_runtime=TmuxTaskRuntime(tmux_runner=fake_tmux),
+    )
+    service.update(issue_id="FARM-123", repo="farm", phase="running", summary="working")
 
-    rows = runner.watch(repo="farm", tail_lines=2)
+    rows = service.watch(repo="farm", tail_lines=2)
 
     assert len(rows) == 1
     row = rows[0]
     assert row["issue_identifier"] == "FARM-123"
-    assert row["session_alive"] is True
+    assert row["runtime_alive"] is True
     assert row["tail_lines"] == ["line one", "line two"]
     assert tmux_calls == [
         ["has-session", "-t", "farm-uuid-123"],

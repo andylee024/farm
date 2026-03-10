@@ -1,7 +1,12 @@
 """Shared support helpers for Farm runtime."""
 
 from farm.support.config import FarmConfig, load_config, load_dotenv_file
-from farm.support.errors import ExternalCommandError, FarmError, LinearApiError
+from farm.support.errors import (
+    ExternalCommandError,
+    FarmError,
+    LinearApiError,
+    UnsupportedRuntimeError,
+)
 
 __all__ = [
     "FarmConfig",
@@ -10,4 +15,5 @@ __all__ = [
     "FarmError",
     "ExternalCommandError",
     "LinearApiError",
+    "UnsupportedRuntimeError",
 ]

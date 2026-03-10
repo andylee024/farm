@@ -13,3 +13,7 @@ class ExternalCommandError(FarmError):
 
 class LinearApiError(FarmError):
     """Raised when Linear API requests fail or return invalid payloads."""
+
+
+class UnsupportedRuntimeError(FarmError):
+    """Raised when a configured task runtime is not available yet."""
