@@ -36,6 +36,14 @@ Farm solves this by:
 
 Farm treats execution as a pluggable task runtime. Today the default runtime is `TmuxTaskRuntime` (`git worktree + tmux`). The long-term target is to add `DaytonaTaskRuntime` without changing the Linear-driven control plane.
 
+Planner handoff with nanoclaw:
+
+1. Nanoclaw creates one parent issue and one or more child issues in Linear.
+2. Nanoclaw moves a child issue to `Approved` when it is ready for execution.
+3. `farm daemon` polls Linear, sees the approved child issue, and calls `TaskService.run()`.
+4. `TaskService` validates the issue, starts the configured `TaskRuntime`, moves the issue to `Coding`, and writes the first task update.
+5. When the agent exits, Farm finalizes the task and moves the issue to `Done` or `Canceled`.
+
 ```bash
 farm daemon --config config.yaml --interval 30 --max-concurrent 1 --agent codex
 ```
@@ -89,7 +97,7 @@ Manual mode:
 
 Daemon mode:
   1) Planner skill creates parent + child tasks in Linear
-  2) Human sets children to Approved
+  2) Human or nanoclaw sets children to Approved
   3) farm daemon --repo <repo> --agent <codex|claude> --max-concurrent 2
      -> polls Linear every N seconds
      -> auto-launches Approved child issues (up to max-concurrent)

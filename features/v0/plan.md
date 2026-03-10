@@ -25,6 +25,12 @@ The planner consumes a feature PRD and creates:
 
 It also explains intent and provides guidance for runtime commands.
 
+For planner-driven automation such as nanoclaw, the handoff to runtime is Linear:
+
+1. Planner creates parent + child issues.
+2. Planner marks a child issue `Approved`.
+3. Farm daemon polls Linear and executes approved child issues through the configured task runtime.
+
 ### Runtime (Farm code)
 
 The runtime executes one approved child task and emits:

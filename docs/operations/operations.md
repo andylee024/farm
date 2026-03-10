@@ -87,6 +87,18 @@ Task-runtime boundary:
 1. `TaskService` owns lifecycle policy, Linear status transitions, artifact writes, and observability snapshots.
 2. `TaskRuntime` owns workspace provisioning, agent process launch, liveness checks, and output tailing.
 
+### Planner Handoff
+
+Expected planner-to-runtime flow with nanoclaw:
+
+1. Nanoclaw creates the parent issue and child issues in Linear.
+2. Nanoclaw moves a child issue to `Approved` when it is ready to run.
+3. `farm daemon` polls for approved child issues and selects eligible work based on repo, existing task directories, and `max_concurrent`.
+4. `TaskService.run()` re-validates the issue, starts the configured task runtime, moves the issue to `Coding`, and writes the first `task_updates.jsonl` entry.
+5. Agent exit triggers `farm finish`, which writes `task_result.json` and moves the issue to `Done` or `Canceled`.
+
+Linear is the queue boundary between nanoclaw and Farm. Nanoclaw does not need to know whether Farm is using `TmuxTaskRuntime` or a future `DaytonaTaskRuntime`.
+
 ## Linear Status Policy
 
 Use exactly these child statuses:
