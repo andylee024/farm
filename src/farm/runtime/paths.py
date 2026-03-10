@@ -1,4 +1,4 @@
-"""Deterministic filesystem and naming helpers for task execution."""
+"""Deterministic filesystem helpers for task artifacts."""
 
 from __future__ import annotations
 
@@ -15,12 +15,10 @@ RESULT_FILENAME = "task_result.json"
 
 @dataclass(slots=True, frozen=True)
 class TaskPaths:
-    worktree: Path
+    task_dir: Path
     farm_dir: Path
     updates: Path
     result: Path
-    branch: str
-    session: str
 
 
 
@@ -30,14 +28,11 @@ def issue_slug(issue_id: str) -> str:
 
 
 def task_paths(*, config: FarmConfig, repo: str, issue_id: str) -> TaskPaths:
-    slug = issue_slug(issue_id)
-    worktree = Path(config.worktree_root) / repo / issue_id
-    farm_dir = worktree / ".farm"
+    task_dir = Path(config.worktree_root) / repo / issue_id
+    farm_dir = task_dir / ".farm"
     return TaskPaths(
-        worktree=worktree,
+        task_dir=task_dir,
         farm_dir=farm_dir,
         updates=farm_dir / UPDATE_FILENAME,
         result=farm_dir / RESULT_FILENAME,
-        branch=f"farm/{slug}",
-        session=f"farm-{slug}",
     )

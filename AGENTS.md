@@ -21,7 +21,7 @@ Before starting coding work, read in this order:
 3. Do not use Linear MCP tools to create/move coding tasks.
 4. Keep planning/business logic in skills/docs, not runtime orchestration code.
 5. Keep runtime artifacts minimal: `task_updates.jsonl` and `task_result.json` only.
-6. Runtime scope is execution and observability only (`run`, `update`, `finish`, `status`, `pulse`, `watch`).
+6. Runtime scope is execution and observability only (`run`, `update`, `finish`, `status`, `pulse`, `watch`, `daemon`).
 7. For this core repo, Linear coding issues must be assigned/labeled under the `farm` project.
 
 ## Scope

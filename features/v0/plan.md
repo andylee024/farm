@@ -1,15 +1,16 @@
 # Farm V0 Plan: Minimal Execution Kernel
 
 Status: Draft  
-Last updated: 2026-03-02
+Last updated: 2026-03-10
 
 ## Goal
 
-Farm should only enable three workflows:
+Farm should only enable four workflows:
 
 1. Planning (skill-owned)
 2. Single task execution (runtime-owned)
-3. Integration/hygiene/review (skill-owned)
+3. Daemon-driven auto-execution (runtime-owned)
+4. Integration/hygiene/review (skill-owned)
 
 Runtime code stays minimal and deterministic.
 
@@ -23,6 +24,12 @@ The planner consumes a feature PRD and creates:
 2. Multiple child Linear issues
 
 It also explains intent and provides guidance for runtime commands.
+
+For planner-driven automation such as nanoclaw, the handoff to runtime is Linear:
+
+1. Planner creates parent + child issues.
+2. Planner marks a child issue `Approved`.
+3. Farm daemon polls Linear and executes approved child issues through the configured task runtime.
 
 ### Runtime (Farm code)
 
@@ -56,8 +63,8 @@ When children are complete, integrator skill:
 +---------------------------+--------------------+
 |             Farm Runtime Kernel                |
 | run / update / finish / status                 |
-| - create worktree                              |
-| - start tmux session                           |
+| - TaskService lifecycle                        |
+| - TaskRuntime backend                          |
 | - append TaskUpdate                            |
 | - write TaskResult                             |
 +---------------------------+--------------------+
@@ -73,7 +80,7 @@ When children are complete, integrator skill:
 
 ## Runtime Contracts
 
-Farm runtime supports only six operations:
+Farm runtime supports seven operations:
 
 1. `run(issue_id, repo, agent)`
 2. `update(issue_id, repo, phase, summary)`
@@ -81,8 +88,9 @@ Farm runtime supports only six operations:
 4. `status(issue_id, repo)`
 5. `pulse(repo)`
 6. `watch(repo)`
+7. `daemon(repos, poll_interval, max_concurrent, agent)` — polling loop
 
-No scheduler, no queue manager, no local state machine, no registry DB.
+No local state machine or registry DB. The daemon uses Linear as the queue and task-directory existence as the dedup mechanism.
 
 ## Runtime Dataclasses
 
@@ -124,14 +132,18 @@ farm run --issue <id> --repo <repo-key> [--agent codex|claude]
 farm update --issue <id> --repo <repo-key> --phase running --summary "..."
 farm finish --issue <id> --repo <repo-key> --outcome completed --summary "..." [--pr-url <url>]
 farm status --issue <id> --repo <repo-key>
+farm pulse --repo <repo-key>
+farm watch --repo <repo-key>
+farm daemon [--repo <repo-key>] --interval 30 --max-concurrent 1 --agent codex
 ```
 
 ## Linear Calls Runtime Needs
 
-Execution runtime only needs:
+Execution runtime needs:
 
 1. `get_issue`
 2. `move_issue_to_status`
+3. `list_issues_by_state` (daemon only — queries Approved issues by project)
 
 Planning/integration skill workflows may use richer Linear operations, but those remain outside runtime orchestration code.
 
@@ -140,18 +152,21 @@ Planning/integration skill workflows may use richer Linear operations, but those
 ```text
 src/farm/
   cli/
-    app.py               # typer entrypoint
-    commands.py          # command handlers
+    commands.py          # typer entrypoint + command handlers
   runtime/
-    models.py            # TaskUpdate, TaskResult
-    runner.py            # run/update/finish/status orchestration
-    paths.py             # deterministic worktree/branch/session naming
+    models.py            # TaskUpdate, TaskResult, Agent
+    task_service.py      # run/update/finish/status orchestration
+    task_runtime.py      # runtime backend interface
+    tmux_task_runtime.py # local git worktree + tmux backend
+    daytona_task_runtime.py
+    daemon.py            # polling loop for auto-launching approved issues
+    paths.py             # deterministic artifact paths
   adapters/
-    linear.py            # get_issue + move_issue_to_status
+    linear.py            # get_issue + move_issue_to_status + list_issues_by_state
     git.py               # shell boundary
     tmux.py              # shell boundary
   support/
-    config.py            # typed config loading
+    config.py            # typed config loading (includes DaemonConfig)
     errors.py            # minimal shared errors
 ```
 
@@ -159,9 +174,8 @@ src/farm/
 
 1. Automatic task decomposition in runtime code
 2. Automatic integration orchestration in runtime code
-3. Multi-task queue scheduling
-4. Runtime-owned planning logic
-5. Runtime-owned review policy logic
+3. Runtime-owned planning logic
+4. Runtime-owned review policy logic
 
 ## Definition of Simplicity
 

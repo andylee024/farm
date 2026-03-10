@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -35,6 +36,20 @@ class LinearConfig(BaseModel):
     team_id_env: str | None = "LINEAR_TEAM_ID"
 
 
+class DaemonConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    poll_interval: float = 30.0
+    max_concurrent: int = 1
+    default_agent: Literal["codex", "claude"] = "codex"
+
+
+class TaskRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["tmux", "daytona"] = "tmux"
+
+
 class FarmConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -42,6 +57,8 @@ class FarmConfig(BaseModel):
     worktree_root: str
     agent_defaults: AgentDefaultsConfig = Field(default_factory=AgentDefaultsConfig)
     linear: LinearConfig | None = None
+    daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+    task_runtime: TaskRuntimeConfig = Field(default_factory=TaskRuntimeConfig)
 
 
 

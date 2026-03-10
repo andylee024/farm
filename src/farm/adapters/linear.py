@@ -58,6 +58,32 @@ query IssueById($id: String!) {
 }
 """
 
+ISSUES_BY_STATE_AND_PROJECT_QUERY = """
+query IssuesByStateAndProject($stateId: String!, $teamId: String!, $projectName: String!) {
+  issues(filter: {
+    team: { id: { eq: $teamId } }
+    state: { id: { eq: $stateId } }
+    project: { name: { eqCaseInsensitive: $projectName } }
+  }) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      parent {
+        id
+      }
+      state {
+        name
+      }
+      project {
+        name
+      }
+    }
+  }
+}
+"""
+
 
 @dataclass(slots=True)
 class LinearIssue:
@@ -192,6 +218,47 @@ class LinearClient:
             state_name=_optional_nested_str(issue_payload, "state", "name"),
             project_name=_optional_nested_str(issue_payload, "project", "name"),
         )
+
+    def list_issues_by_state(self, *, state_name: str, project_name: str) -> list[LinearIssue]:
+        state_id = self.get_state_id(state_name)
+        data = self._execute(
+            ISSUES_BY_STATE_AND_PROJECT_QUERY,
+            {"stateId": state_id, "teamId": self.team_id, "projectName": project_name},
+        )
+        issues_payload = data.get("issues")
+        if not isinstance(issues_payload, dict):
+            raise LinearApiError("Linear API response missing `issues` payload.")
+        nodes = issues_payload.get("nodes")
+        if not isinstance(nodes, list):
+            raise LinearApiError("Linear API issues payload missing `nodes` list.")
+
+        results: list[LinearIssue] = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            description_value = node.get("description")
+            if description_value is None:
+                description_value = ""
+            if not isinstance(description_value, str):
+                continue
+            identifier = node.get("identifier")
+            if identifier is not None and not isinstance(identifier, str):
+                continue
+            try:
+                results.append(
+                    LinearIssue(
+                        id=_required_str(node, "id"),
+                        identifier=identifier,
+                        title=_required_str(node, "title"),
+                        description=description_value,
+                        parent_id=_optional_nested_str(node, "parent", "id"),
+                        state_name=_optional_nested_str(node, "state", "name"),
+                        project_name=_optional_nested_str(node, "project", "name"),
+                    )
+                )
+            except LinearApiError:
+                continue
+        return results
 
     def move_issue_to_status(self, issue_id: str, status_name: str) -> None:
         state_id = self.get_state_id(status_name)
