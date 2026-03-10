@@ -1,7 +1,7 @@
 # Farm Operations (Canonical)
 
-Status: Active  
-Last updated: 2026-03-02
+Status: Active
+Last updated: 2026-03-09
 
 ## Purpose
 
@@ -13,7 +13,7 @@ Farm exists to make feature delivery simple:
 2. Execute child coding tasks with a predictable runtime.
 3. Finish with one integration PR review for the feature.
 
-Farm runs one approved Linear child issue at a time and writes exactly two local artifacts:
+Farm runs approved Linear child issues and writes exactly two local artifacts per task:
 
 1. `task_updates.jsonl`
 2. `task_result.json`
@@ -54,9 +54,12 @@ farm finish --config "$FARM_CONFIG" --repo "$REPO_KEY" --issue "<child-issue-id>
 farm status --config "$FARM_CONFIG" --repo "$REPO_KEY" --issue "<child-issue-id>"
 farm pulse --config "$FARM_CONFIG" --repo "$REPO_KEY"
 farm watch --config "$FARM_CONFIG" --repo "$REPO_KEY" --interval 1.5 --lines 3
+farm daemon --config "$FARM_CONFIG" [--repo "$REPO_KEY"] --interval 30 --max-concurrent 1 --agent codex
 ```
 
 ## Lifecycle
+
+### Manual Mode
 
 1. Human sets child issue to `Approved` in Linear.
 2. `farm run` starts work and moves issue to `Coding`.
@@ -66,6 +69,16 @@ farm watch --config "$FARM_CONFIG" --repo "$REPO_KEY" --interval 1.5 --lines 3
 4. Optional `farm update` adds progress checkpoints.
 5. `farm finish --outcome completed` can be used as a manual override and moves issue to `Done`.
 6. `farm finish --outcome canceled` can be used as a manual override and moves issue to `Canceled`.
+
+### Daemon Mode
+
+1. `farm daemon` starts a polling loop on the host.
+2. Every `--interval` seconds, it queries Linear for `Approved` issues across configured repos (or a single `--repo`).
+3. For each Approved issue without an existing worktree, it calls `farm run` internally.
+4. Respects `--max-concurrent` (default 1) to limit parallel tasks.
+5. Stops gracefully on SIGINT/SIGTERM.
+
+This enables an event-driven split: a planner (e.g. nanoclaw in a container) writes tasks to Linear, and the daemon running on the host auto-executes them with full filesystem and agent access.
 
 ## Linear Status Policy
 
@@ -89,7 +102,6 @@ Before moving a child issue to `Approved`, it should be:
 
 1. Runtime-owned task decomposition/planning.
 2. Runtime-owned integration/review policy logic.
-3. Multi-task queue scheduling in runtime.
 
 ## Artifact Contract
 
@@ -203,6 +215,27 @@ Default behavior uses bypass flags. To disable both, set:
 ```yaml
 agent_defaults:
   dangerous_bypass_permissions: false
+```
+
+## Daemon Configuration
+
+`farm daemon` behavior can be set via CLI flags or `config.yaml`:
+
+```yaml
+daemon:
+  poll_interval: 30        # seconds between Linear polls
+  max_concurrent: 1        # max parallel agent sessions
+  default_agent: codex     # codex or claude
+```
+
+CLI flags override config values. Omit `--repo` to poll all repos in config.
+
+```bash
+# Poll all repos, use config defaults
+farm daemon --config config.yaml
+
+# Poll one repo, override concurrency
+farm daemon --config config.yaml --repo farm --max-concurrent 2 --agent claude
 ```
 
 Minimal review summary template:

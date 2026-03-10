@@ -27,8 +27,16 @@ Farm solves this by:
 ## Intended Workflow
 
 1. Planner skill creates one parent issue and atomic child issues in Linear.
-2. Farm runtime runs one approved child at a time (`run/update/finish/status`).
+2. Farm runtime runs approved children (`run/update/finish/status`), either manually or via the daemon.
 3. Integrator skill consolidates completed children into one final PR for review.
+
+### Daemon Mode
+
+`farm daemon` is a polling loop that watches Linear for `Approved` issues and auto-launches them. This enables an event-driven split where the planner (e.g. nanoclaw) writes tasks to Linear, and the daemon on the host picks them up and executes them.
+
+```bash
+farm daemon --config config.yaml --interval 30 --max-concurrent 1 --agent codex
+```
 
 ## Architecture (ASCII)
 
@@ -46,11 +54,13 @@ Farm solves this by:
                             |
  +--------------------------+-------------------------+
  |                 Farm Runtime Kernel                |
- |                  run / update / finish / status    |
+ |  run / update / finish / status / pulse / watch   |
  |                                                     |
  |  run: git worktree -> tmux session -> agent launch |
  |  update: append TaskUpdate                          |
  |  finish: write TaskResult + move status            |
+ |                                                     |
+ |  daemon: poll Linear -> auto-run approved issues   |
  +--------------------------+-------------------------+
                             |
                             v
@@ -65,30 +75,31 @@ Farm solves this by:
 ## User Flow (ASCII)
 
 ```text
-1) Planner skill creates parent + child tasks in Linear
-2) Human sets one child to Approved
-3) farm run --repo <repo> --issue <child-id> --agent <codex|claude>
-   -> create worktree
-   -> start tmux + launch agent
-   -> move Linear: Approved -> Coding
-   -> write TaskUpdate(starting)
-   -> when agent session exits: auto-finish task (Done on success, Canceled on failure)
-4) farm update ... --phase running --summary "..."
-   -> append heartbeat TaskUpdate(s)
-5) farm finish ... --outcome completed|canceled|blocked|failed (optional manual override)
-   -> move Linear: completed -> Done (else -> Canceled)
-   -> append terminal TaskUpdate
-   -> write task_result.json
-6) farm status ... shows one task state; farm pulse ... shows repo task snapshot
-7) farm watch ... shows live snapshot + recent session output lines
-8) Integrator skill consolidates completed children into one final PR
+Manual mode:
+  1) Planner skill creates parent + child tasks in Linear
+  2) Human sets one child to Approved
+  3) farm run --repo <repo> --issue <child-id> --agent <codex|claude>
+     -> create worktree, start tmux + agent, move Linear to Coding
+  4) farm update ... --phase running --summary "..."
+  5) farm finish ... --outcome completed|canceled|blocked|failed (optional manual override)
+  6) farm status / pulse / watch for observability
+  7) Integrator skill consolidates completed children into one final PR
+
+Daemon mode:
+  1) Planner skill creates parent + child tasks in Linear
+  2) Human sets children to Approved
+  3) farm daemon --repo <repo> --agent <codex|claude> --max-concurrent 2
+     -> polls Linear every N seconds
+     -> auto-launches Approved issues (up to max-concurrent)
+     -> skips already-started issues
+  4) farm watch for observability
+  5) Integrator skill consolidates completed children into one final PR
 ```
 
 ## What Farm Is Not
 
 1. Not a planning engine in runtime code.
-2. Not a multi-task scheduler or queue manager.
-3. Not a replacement for human prioritization or final merge approval.
+2. Not a replacement for human prioritization or final merge approval.
 
 ## Core Design
 
@@ -109,6 +120,7 @@ No queue scheduler, local lifecycle state machine, or registry database in the c
 - `farm status` - read Linear + local artifacts summary
 - `farm pulse` - lightweight observability snapshot for all started tasks in a repo
 - `farm watch` - terminal UI for live status + recent tmux output per task
+- `farm daemon` - poll Linear and auto-launch approved issues
 
 ## Documentation
 

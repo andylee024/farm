@@ -12,3 +12,7 @@ linear:
   api_key_env: LINEAR_API_KEY
   team_id_env: LINEAR_TEAM_ID
   # team_id: YOUR_LINEAR_TEAM_ID
+daemon:
+  poll_interval: 30
+  max_concurrent: 1
+  default_agent: codex

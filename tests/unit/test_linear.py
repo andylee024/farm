@@ -126,6 +126,111 @@ def test_move_issue_to_status_rejects_alias_when_exact_state_missing() -> None:
         client.move_issue_to_status("issue-10", "Approved")
 
 
+def test_list_issues_by_state_returns_matching_issues() -> None:
+    call_count = 0
+
+    def fake_request(url, payload, headers):
+        nonlocal call_count
+        _ = url
+        _ = headers
+        query = payload["query"]
+        if "TeamStates" in query:
+            call_count += 1
+            return {
+                "data": {
+                    "team": {
+                        "states": {
+                            "nodes": [
+                                {"id": "state-approved", "name": "Approved"},
+                                {"id": "state-done", "name": "Done"},
+                            ]
+                        }
+                    }
+                }
+            }
+        if "IssuesByStateAndProject" in query:
+            call_count += 1
+            variables = payload["variables"]
+            assert variables["stateId"] == "state-approved"
+            assert variables["teamId"] == "team-abc"
+            assert variables["projectName"] == "farm"
+            return {
+                "data": {
+                    "issues": {
+                        "nodes": [
+                            {
+                                "id": "issue-1",
+                                "identifier": "FARM-1",
+                                "title": "Task 1",
+                                "description": "desc1",
+                                "parent": {"id": "parent-1"},
+                                "state": {"name": "Approved"},
+                                "project": {"name": "farm"},
+                            },
+                            {
+                                "id": "issue-2",
+                                "identifier": "FARM-2",
+                                "title": "Task 2",
+                                "description": "desc2",
+                                "parent": None,
+                                "state": {"name": "Approved"},
+                                "project": {"name": "farm"},
+                            },
+                        ]
+                    }
+                }
+            }
+        raise AssertionError(f"Unexpected query: {query}")
+
+    client = LinearClient(
+        api_url="https://api.linear.app/graphql",
+        api_key="secret",
+        team_id="team-abc",
+        request_fn=fake_request,
+    )
+
+    issues = client.list_issues_by_state(state_name="Approved", project_name="farm")
+    assert len(issues) == 2
+    assert issues[0].id == "issue-1"
+    assert issues[0].identifier == "FARM-1"
+    assert issues[0].parent_id == "parent-1"
+    assert issues[1].id == "issue-2"
+    assert issues[1].parent_id is None
+    assert call_count == 2
+
+
+def test_list_issues_by_state_returns_empty_on_no_matches() -> None:
+    def fake_request(url, payload, headers):
+        _ = url
+        _ = headers
+        query = payload["query"]
+        if "TeamStates" in query:
+            return {
+                "data": {
+                    "team": {
+                        "states": {
+                            "nodes": [
+                                {"id": "state-approved", "name": "Approved"},
+                            ]
+                        }
+                    }
+                }
+            }
+        if "IssuesByStateAndProject" in query:
+            return {"data": {"issues": {"nodes": []}}}
+        raise AssertionError(f"Unexpected query: {query}")
+
+    client = LinearClient(
+        api_url="https://api.linear.app/graphql",
+        api_key="secret",
+        team_id="team-abc",
+        request_fn=fake_request,
+    )
+
+    issues = client.list_issues_by_state(state_name="Approved", project_name="farm")
+    assert issues == []
+
+
 def test_graphql_errors_raise_linear_api_error() -> None:
     def fake_request(url, payload, headers):
         _ = url

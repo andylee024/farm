@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -244,6 +245,46 @@ def watch(
         if duration > 0 and (time.monotonic() - started) >= duration:
             return
         time.sleep(interval)
+
+
+@app.command()
+def daemon(
+    config: Path = typer.Option(Path("config.yaml"), "--config", help="Path to config yaml."),
+    interval: float = typer.Option(0.0, "--interval", min=1.0, help="Poll interval seconds. 0 = use config."),
+    max_concurrent: int = typer.Option(0, "--max-concurrent", min=0, help="Max parallel tasks. 0 = use config."),
+    agent: Agent = typer.Option(Agent.CODEX, "--agent", help="Agent model family."),
+    repo: str | None = typer.Option(None, "--repo", help="Limit to specific repo. Omit to poll all."),
+) -> None:
+    """Poll Linear for Approved issues and auto-launch them."""
+    from farm.runtime.daemon import FarmDaemon
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+
+    try:
+        resolved_config = resolve_config_path(config)
+        cfg = load_config_or_raise(resolved_config)
+        linear = build_linear_client(cfg)
+    except (ValueError, LinearApiError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    poll_interval = interval if interval > 0 else cfg.daemon.poll_interval
+    concurrency = max_concurrent if max_concurrent > 0 else cfg.daemon.max_concurrent
+    repos = [repo] if repo else None
+
+    farm_daemon = FarmDaemon(
+        config=cfg,
+        linear_client=linear,
+        config_path=resolved_config,
+        poll_interval=poll_interval,
+        max_concurrent=concurrency,
+        default_agent=agent,
+        repos=repos,
+    )
+    farm_daemon.run()
 
 
 def main() -> None:
